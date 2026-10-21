@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Your own setup: presets and settings, play data, logs, preset pictures, backups.
+# (Created by DoomDeck next to the program; they hold your personal paths.)
+/doomdeck.json
+/doomdeck.json.bad
+/data/
+/logs/
+/pictures/
+/backups/
+
+# Scratch copies and update backups
+/to test/
+/backup-before-update-*/
+
+# Never commit game content or engine files
+*.wad
+*.WAD
+*.pk3
+*.pk7
+*.ipk3
+*.ipk7
+*.deh
+*.bex
+*.lmp
+*.zds
+*.dsg
+*.ini
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
