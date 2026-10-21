@@ -184,3 +184,8 @@ Not included on purpose: dmflags/compatibility calculators.
     python3 -m unittest discover -s tests -t .
 
 `python3 -m doomdeck --print-command "Preset name"` prints a preset's command.
+
+## License
+
+MIT, see [LICENSE](LICENSE). This covers the launcher code only; Doom, its IWADs and
+any WADs or engines you use belong to their respective owners.
