@@ -13,11 +13,45 @@ preset, import from a pasted command line, and daily config backups.
 IWAD or WAD/PK3 files, or an engine; you bring your own. Not affiliated with id
 Software or the UZDoom/GZDoom projects.
 
-## Requirements
+## Requirements and dependencies
 
-* Linux with Python 3.10+ and PySide6 (Arch: `sudo pacman -S pyside6`; `run.sh`
-  can also install it into a private `./.venv`)
-* A ZDoom-family engine such as UZDoom, plus your own IWAD(s)
+DoomDeck is a Linux desktop program. It was developed and tested on Arch Linux with
+Hyprland (Wayland).
+
+| What | Needed? | Notes |
+| --- | --- | --- |
+| **Python 3.10 or newer** | required | Developed on 3.13. Everything except the window uses only the standard library. |
+| **PySide6 (Qt 6)** | required | The only third-party Python package. `PySide6-Essentials` is enough. |
+| **A ZDoom-family engine** | required | UZDoom, GZDoom or similar. Not included; set its path in Settings. |
+| **An IWAD** (`DOOM2.WAD`, `DOOM.WAD`...) | required | Not included; bring your own, in the IWAD folder you set in Settings. |
+| `qt6-wayland` | Wayland only | Lets Qt open a native Wayland window. It is normally present on a Wayland desktop. |
+| `qt6-imageformats` | optional | Only to use `.webp` images as preset pictures. PNG, JPG and BMP work without it. |
+| `xdg-utils` | optional | The "Open folder" buttons use the desktop's default file manager. |
+| `gamemode`, `mangohud`... | optional | Only if you set one as a launch wrapper. |
+| `python3-venv` | optional | Only on distros that split it out (e.g. Debian/Ubuntu), if `run.sh` has to create its own environment. |
+
+### Installing PySide6
+
+* **Arch Linux:** `sudo pacman -S python pyside6` (add `qt6-wayland` if the window
+  fails to open on Wayland)
+* **Anything else:** nothing to do. `./run.sh` notices that PySide6 is missing,
+  creates a private virtual environment in `./.venv` and runs
+  `pip install PySide6-Essentials` there (one time, needs internet). Nothing is
+  installed system-wide. You can also do the same by hand:
+
+      python3 -m venv .venv
+      .venv/bin/pip install PySide6-Essentials
+      .venv/bin/python -m doomdeck
+
+### Troubleshooting
+
+* **"PySide6 is not installed"** - use `./run.sh` (it sets up `./.venv`), or install
+  PySide6 as above.
+* **Qt "could not load the platform plugin" / no window on Wayland** - install
+  `qt6-wayland`, or try `QT_QPA_PLATFORM=xcb ./run.sh`.
+* **The window opens but nothing launches** - check File → Settings → Engines
+  points at the engine program (it must be executable); problems are also marked
+  next to the preset and listed under the load order.
 
 ## Wads folder layout
 
@@ -180,6 +214,8 @@ It uses absolute paths, so run that again after moving the folder.
 Not included on purpose: dmflags/compatibility calculators.
 
 ## Tests
+
+The tests cover everything except the window, so they need no PySide6 and no display:
 
     python3 -m unittest discover -s tests -t .
 
