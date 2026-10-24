@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import compat
 from .library import is_patch
 from .models import AppConfig, Engine, Preset, Settings, safe_name
 
@@ -235,6 +236,12 @@ def check(config: AppConfig, preset: Preset) -> list[Problem]:
                 "warning", f"Two files are both called {Path(name).name}; the second may override the first."
             ))
         names[key] = name
+    if iwad is not None and engine is not None:
+        for text in compat.check(
+            engine_name=engine.name, engine_path=engine.path, iwad_name=iwad.name,
+            files=active_files(config, preset), warp=preset.warp,
+        ):
+            problems.append(Problem("warning", text))
     if preset.wrapper.strip() or config.settings.global_wrapper.strip():
         wrapper = shlex.split(preset.wrapper.strip() or config.settings.global_wrapper.strip())
         if wrapper and shutil.which(wrapper[0]) is None:
@@ -368,7 +375,6 @@ def build_command(
     if preset.width > 0 and preset.height > 0:
         cmd += ["-width", str(preset.width), "-height", str(preset.height)]
 
-    cmd += _split(settings.global_args)
     cmd += _split(preset.extra_args)
     return cmd
 
@@ -422,7 +428,20 @@ def launch(
             # Run from the engine's own folder so it finds its bundled files.
             cwd=str(Path(engine.path).expanduser().parent) if engine else None,
         )
+    preset.count_map_play(start_map_for(preset, **{
+        k: v for k, v in start_options.items() if k in ("map_override", "load_save", "play_demo")
+    }))
     return process, cmd, log_path
+
+
+def start_map_for(
+    preset: Preset, *, map_override: str | None = None, load_save: str | None = None,
+    play_demo: str | None = None,
+) -> str:
+    """The map a launch starts on ("" when it starts normally, loads a save or plays a demo)."""
+    if play_demo or load_save:
+        return ""
+    return (map_override or preset.warp or "").strip()
 
 
 def record_session(preset: Preset, started: float, ended: float | None = None) -> None:
@@ -450,8 +469,14 @@ def _exec_quote(arg: str) -> str:
     return '"' + arg.replace("\\", "\\\\").replace("%", "%%") + '"'
 
 
-def desktop_entry_text(preset: Preset, run_script: Path, icon: str, workdir: Path) -> str:
-    """Contents of a launcher-menu entry that starts one preset directly."""
+def desktop_entry_text(preset: Preset, run_script: "Path | list[str]", icon: str, workdir: Path) -> str:
+    """Contents of a launcher-menu entry that starts one preset directly.
+
+    `run_script` is the program that starts DoomDeck, or a list of arguments when it
+    takes some (such as `python -m doomdeck`).
+    """
+    program = [str(run_script)] if isinstance(run_script, (str, Path)) else [str(a) for a in run_script]
+    exec_start = " ".join(_exec_quote(part) for part in program)
     name = " ".join(preset.name.split()) or "Doom"
     return (
         "[Desktop Entry]\n"
@@ -459,7 +484,7 @@ def desktop_entry_text(preset: Preset, run_script: Path, icon: str, workdir: Pat
         f"Name={name}\n"
         "GenericName=Doom preset\n"
         f"Comment=Play {name} with DoomDeck\n"
-        f"Exec={_exec_quote(str(run_script))} --launch {_exec_quote(preset.name)}\n"
+        f"Exec={exec_start} --launch {_exec_quote(preset.name)}\n"
         f"Path={workdir}\n"
         f"Icon={icon}\n"
         "Terminal=false\n"
@@ -476,7 +501,7 @@ def desktop_entry_path(preset: Preset, directory: Path | None = None) -> Path:
 
 
 def write_desktop_entry(
-    preset: Preset, run_script: Path, icon: str, workdir: Path, directory: Path | None = None
+    preset: Preset, run_script: "Path | list[str]", icon: str, workdir: Path, directory: Path | None = None
 ) -> Path:
     """Write the preset's launcher-menu entry and return its path."""
     target = desktop_entry_path(preset, directory)

@@ -1,8 +1,15 @@
 """Loading and saving the DoomDeck config file.
 
-The config lives next to the program (not in the home directory) so the whole tool
-stays in one folder. Set the DOOMDECK_CONFIG environment variable to use a
-different file.
+DoomDeck keeps its own files (config, logs, backups, pictures, downloaded engines) in
+one folder, APP_DIR:
+
+* run from a source folder (the folder has run.sh): beside the program, so the whole
+  tool stays in one folder and can be moved around;
+* installed as a package (pacman/pip): ~/.config/doomdeck, since the install location is
+  read-only;
+* DOOMDECK_HOME in the environment overrides both.
+
+Set DOOMDECK_CONFIG to use a different config file inside that folder.
 """
 
 from __future__ import annotations
@@ -10,14 +17,54 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 import tempfile
 import time
 from pathlib import Path
 
 from .models import AppConfig, Engine, DEFAULT_DOOM_HOME
 
-APP_DIR = Path(__file__).resolve().parent.parent
+PROGRAM_DIR = Path(__file__).resolve().parent.parent
 CONFIG_FILENAME = "doomdeck.json"
+
+
+def resolve_app_dir(environ: dict | None = None, program_dir: Path | None = None) -> Path:
+    """Where DoomDeck keeps its own files (see the module docstring)."""
+    environ = os.environ if environ is None else environ
+    program_dir = program_dir or PROGRAM_DIR
+    if environ.get("DOOMDECK_HOME"):
+        return Path(environ["DOOMDECK_HOME"]).expanduser()
+    portable = (program_dir / "run.sh").is_file() or (program_dir / CONFIG_FILENAME).is_file()
+    if portable and os.access(program_dir, os.W_OK):
+        return program_dir
+    base = environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "doomdeck"
+
+
+APP_DIR = resolve_app_dir()
+
+
+def find_icon() -> Path | None:
+    """The DoomDeck icon file, wherever this copy of the program keeps it."""
+    for candidate in (
+        APP_DIR / "doomdeck.png",
+        PROGRAM_DIR / "doomdeck.png",
+        Path(__file__).resolve().parent / "doomdeck.png",
+        Path("/usr/share/icons/hicolor/256x256/apps/doomdeck.png"),
+    ):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def launcher_command() -> list[str]:
+    """Command that starts DoomDeck, for desktop shortcuts: run.sh if it exists, else the
+    installed `doomdeck` program, else this Python running the package."""
+    script = PROGRAM_DIR / "run.sh"
+    if script.is_file():
+        return [str(script)]
+    installed = shutil.which("doomdeck")
+    return [installed] if installed else [sys.executable, "-m", "doomdeck"]
 
 
 def default_path() -> Path:

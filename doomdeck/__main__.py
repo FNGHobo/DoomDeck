@@ -2,7 +2,9 @@
 
 `python -m doomdeck --print-command "Preset name"` prints the command for a preset
 and exits; `--launch "Preset name"` starts a preset without a window, `--list` prints the
-preset names. None of these import Qt, so they also work without PySide6.
+preset names, `--check-updates` asks the download sources whether any library project has
+a newer version (add `--json` for machine-readable output). None of these import Qt, so
+they also work without PySide6.
 """
 
 from __future__ import annotations
@@ -12,8 +14,9 @@ import os
 import sys
 import time
 
+from . import __version__
 from . import config as config_io
-from . import launch
+from . import launch, updates
 
 
 def print_command(name: str) -> int:
@@ -59,8 +62,35 @@ def launch_preset(name: str) -> int:
     return 0
 
 
+def check_updates(as_json: bool) -> int:
+    """Ask each project's source for its newest version and print what changed.
+
+    Exit code 0 when everything is current, 10 when at least one update exists, so a
+    script or desktop notifier can act on the result without parsing the text.
+    """
+    import json
+
+    config = config_io.load()
+    results = updates.check_all(config.library_meta)
+    if as_json:
+        print(json.dumps([
+            {"project": r.key, "kind": r.kind, "installed": r.installed, "latest": r.latest,
+             "update": r.is_update, "title": r.title, "url": r.url, "error": r.error}
+            for r in results
+        ], indent=2))
+    elif results:
+        print(updates.report_text(results))
+    else:
+        print("No project has an update source yet (right-click a library project to set one).")
+    return 10 if any(r.is_update for r in results) else 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="doomdeck", description="A Doom launcher.")
+    parser.add_argument("--version", action="version", version=f"DoomDeck {__version__}")
+    parser.add_argument("--check-updates", action="store_true",
+                        help="check downloaded wads/mods for newer versions and exit")
+    parser.add_argument("--json", action="store_true", help="with --check-updates: print JSON")
     parser.add_argument("--print-command", metavar="PRESET", help="print a preset's command and exit")
     parser.add_argument("--launch", metavar="PRESET", help="start a preset without opening the window")
     parser.add_argument("--list", action="store_true", help="list preset names and exit")
@@ -69,6 +99,8 @@ def main() -> int:
         return print_command(args.print_command)
     if args.launch:
         return launch_preset(args.launch)
+    if args.check_updates:
+        return check_updates(args.json)
     if args.list:
         for preset in config_io.load().presets:
             print(preset.name)
@@ -98,8 +130,8 @@ def main() -> int:
     app.setApplicationName("DoomDeck")
     # Matches doomdeck.desktop, so the desktop shows the launcher's icon for the window.
     app.setDesktopFileName("doomdeck")
-    icon_file = config_io.APP_DIR / "doomdeck.png"
-    if icon_file.is_file():
+    icon_file = config_io.find_icon()
+    if icon_file is not None:
         app.setWindowIcon(QtGui.QIcon(str(icon_file)))
     ui_theme.apply(app)
     window = MainWindow(config_io.load(), config_io.default_path())

@@ -12,9 +12,11 @@ from pathlib import Path
 
 from PySide6 import QtCore, QtWidgets
 
-from . import library
+from . import config as config_io
+from . import engines, library
 from .models import AppConfig, Engine
 from .ui_widgets import FileButtons, FileList
+from .ui_workers import run_with_popup
 
 
 # Settings field that says "give each preset its own subfolder", per folder kind.
@@ -59,6 +61,8 @@ class SettingsDialog(QtWidgets.QDialog):
         # Names engines had when the dialog opened, to update presets after a rename.
         self._original_names = [e.name for e in self.config.engines]
         self._loading = False
+        # Presets to move to a newly installed engine version: {old engine name: new name}.
+        self._switch: dict[str, str] = {}
         # Folder names hidden from the library: a working copy that is written back
         # on OK. Names of folders that are not currently on disk are kept as they are.
         self._hidden = set(self.config.settings.hidden_categories)
@@ -116,6 +120,10 @@ class SettingsDialog(QtWidgets.QDialog):
         self.engine_config_flag = QtWidgets.QLineEdit()
         self.engine_save_flag = QtWidgets.QLineEdit()
         self.engine_shot_flag = QtWidgets.QLineEdit()
+        self.engine_version = QtWidgets.QLineEdit()
+        self.engine_version.setPlaceholderText("e.g. 4.14.3 (filled in when installed here)")
+        self.engine_repo = QtWidgets.QLineEdit()
+        self.engine_repo.setPlaceholderText("GitHub owner/repository, e.g. UZDoom/UZDoom")
         self.engine_status = QtWidgets.QLabel()
         self.engine_status.setWordWrap(True)
         form.addRow("Name", self.engine_name)
@@ -125,6 +133,21 @@ class SettingsDialog(QtWidgets.QDialog):
         form.addRow("Config switch", self.engine_config_flag)
         form.addRow("Save folder switch", self.engine_save_flag)
         form.addRow("Screenshot switch", self.engine_shot_flag)
+        form.addRow("Version", self.engine_version)
+        form.addRow("Update source", self.engine_repo)
+        update_row = QtWidgets.QHBoxLayout()
+        self.engine_check_button = QtWidgets.QPushButton("Check for update")
+        self.engine_check_button.clicked.connect(lambda _c=False: self._check_engine_update())
+        self.engine_install_button = QtWidgets.QPushButton("Install latest…")
+        self.engine_install_button.setToolTip(
+            "Download the newest release into DoomDeck's engines folder as a new engine entry. "
+            "The current one is kept, so you can go back."
+        )
+        self.engine_install_button.clicked.connect(lambda _c=False: self._install_engine_update())
+        update_row.addWidget(self.engine_check_button)
+        update_row.addWidget(self.engine_install_button)
+        update_row.addStretch(1)
+        form.addRow("", update_row)
         hint = QtWidgets.QLabel(
             "Switches default to the ZDoom family (UZDoom, GZDoom, Zandronum). "
             "Clear a switch to stop passing it to this engine."
@@ -139,6 +162,7 @@ class SettingsDialog(QtWidgets.QDialog):
         for edit in (
             self.engine_name, self.engine_path, self.engine_args,
             self.engine_config_flag, self.engine_save_flag, self.engine_shot_flag,
+            self.engine_version, self.engine_repo,
         ):
             edit.textEdited.connect(self._engine_edited)
         return page
@@ -162,6 +186,8 @@ class SettingsDialog(QtWidgets.QDialog):
         for edit in (
             self.engine_name, self.engine_path, self.engine_args,
             self.engine_config_flag, self.engine_save_flag, self.engine_shot_flag,
+            self.engine_version, self.engine_repo,
+            self.engine_check_button, self.engine_install_button,
         ):
             edit.setEnabled(engine is not None)
         self.engine_name.setText(engine.name if engine else "")
@@ -170,6 +196,8 @@ class SettingsDialog(QtWidgets.QDialog):
         self.engine_config_flag.setText(engine.config_flag if engine else "")
         self.engine_save_flag.setText(engine.save_flag if engine else "")
         self.engine_shot_flag.setText(engine.screenshot_flag if engine else "")
+        self.engine_version.setText(engine.version if engine else "")
+        self.engine_repo.setText(engine.update_repo if engine else "")
         self._loading = False
         self._update_engine_status()
 
@@ -184,6 +212,8 @@ class SettingsDialog(QtWidgets.QDialog):
         engine.config_flag = self.engine_config_flag.text().strip()
         engine.save_flag = self.engine_save_flag.text().strip()
         engine.screenshot_flag = self.engine_shot_flag.text().strip()
+        engine.version = self.engine_version.text().strip()
+        engine.update_repo = self.engine_repo.text().strip()
         item = self.engine_list.currentItem()
         if item is not None:
             item.setText(engine.name)
@@ -226,6 +256,110 @@ class SettingsDialog(QtWidgets.QDialog):
             del self._original_names[row]
             self._fill_engine_list()
 
+    def _engine_repo_name(self, engine: Engine) -> str:
+        """The GitHub repository to ask about: the typed one, or UZDoom's for a UZDoom engine."""
+        if engine.update_repo.strip():
+            return engine.update_repo.strip()
+        if "uzdoom" in (engine.path + engine.name).lower():
+            return engines.DEFAULT_REPO
+        return ""
+
+    def _check_engine_update(self) -> None:
+        engine = self._current_engine()
+        if engine is None:
+            return
+        repo = self._engine_repo_name(engine)
+        if not repo:
+            QtWidgets.QMessageBox.information(
+                self, "Update source", "Type the engine's GitHub address (owner/repository) in Update source first."
+            )
+            return
+
+        def done(release) -> None:
+            if engines.is_newer(engine.version, release.tag):
+                text = (f"A newer version is available: {release.tag} ({release.published}).\n"
+                        f"Installed: {engine.version or 'unknown'}.\n\nUse “Install latest…” to download it.")
+            else:
+                text = f"{engine.name} is up to date (latest release: {release.tag})."
+            QtWidgets.QMessageBox.information(self, "Engine update", text)
+
+        run_with_popup(self, f"Checking {repo}…", lambda _w: engines.latest_release(repo), done,
+                       lambda message: QtWidgets.QMessageBox.warning(self, "Engine update", message))
+
+    def _install_engine_update(self) -> None:
+        engine = self._current_engine()
+        if engine is None:
+            return
+        repo = self._engine_repo_name(engine)
+        if not repo:
+            QtWidgets.QMessageBox.information(
+                self, "Update source", "Type the engine's GitHub address (owner/repository) in Update source first."
+            )
+            return
+        run_with_popup(self, f"Looking up the newest {repo} release…",
+                       lambda _w: engines.latest_release(repo),
+                       lambda release: self._choose_engine_asset(engine, repo, release),
+                       lambda message: QtWidgets.QMessageBox.warning(self, "Engine update", message))
+
+    def _choose_engine_asset(self, engine: Engine, repo: str, release) -> None:
+        if not engines.is_newer(engine.version, release.tag) and engine.version:
+            answer = QtWidgets.QMessageBox.question(
+                self, "Engine update",
+                f"{release.tag} is already the version of “{engine.name}”. Download it again anyway?",
+            )
+            if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+                return
+        candidates = engines.linux_assets(release)
+        if not candidates:
+            names = "\n".join(a.name for a in release.assets) or "(no files)"
+            QtWidgets.QMessageBox.warning(
+                self, "Engine update",
+                f"{release.tag} has no download that looks like a Linux build. Its files are:\n{names}\n\n"
+                f"Download one by hand from {release.url or 'its releases page'} and set the Program path.",
+            )
+            return
+        asset = candidates[0]
+        if len(candidates) > 1:
+            labels = [f"{a.name}  ({a.size / (1024 * 1024):.0f} MB)" for a in candidates]
+            label, ok = QtWidgets.QInputDialog.getItem(
+                self, "Which download?", f"{release.tag} has several Linux downloads:", labels, 0, False
+            )
+            if not ok:
+                return
+            asset = candidates[labels.index(label)]
+        root = config_io.APP_DIR / "engines"
+
+        def work(worker):
+            return engines.install_asset(asset, release.tag, root, worker.report, worker.cancelled)
+
+        run_with_popup(
+            self, f"Downloading {asset.name}…", work,
+            lambda program: self._engine_installed(engine, repo, release.tag, program),
+            lambda message: QtWidgets.QMessageBox.warning(self, "Engine update", message),
+        )
+
+    def _engine_installed(self, old: Engine, repo: str, tag: str, program) -> None:
+        """Add the installed version as its own engine entry; offer to move presets to it."""
+        base = Path(repo).name or old.name
+        names = {e.name for e in self.config.engines}
+        name, number = f"{base} {tag}", 2
+        while name in names:
+            name, number = f"{base} {tag} ({number})", number + 1
+        self.config.engines.append(Engine(
+            name=name, path=str(program), extra_args=old.extra_args, config_flag=old.config_flag,
+            save_flag=old.save_flag, screenshot_flag=old.screenshot_flag, version=tag, update_repo=repo,
+        ))
+        self._original_names.append(name)
+        self._fill_engine_list()
+        self.engine_list.setCurrentRow(len(self.config.engines) - 1)
+        answer = QtWidgets.QMessageBox.question(
+            self, "Engine installed",
+            f"Installed {tag} as “{name}”.\n\nSwitch the presets that use “{old.name}” to it? "
+            f"(“{old.name}” stays available if you want to go back.)",
+        )
+        if answer == QtWidgets.QMessageBox.StandardButton.Yes:
+            self._switch[old.name] = name
+
     # ---- folders tab -----------------------------------------------------------
     def _build_folders_tab(self) -> QtWidgets.QWidget:
         page = QtWidgets.QWidget()
@@ -233,10 +367,7 @@ class SettingsDialog(QtWidgets.QDialog):
         self.wads_root = QtWidgets.QLineEdit()
         self.iwads_dir = QtWidgets.QLineEdit()
         self.data_root = QtWidgets.QLineEdit()
-        self.mapsets_category = QtWidgets.QLineEdit()
-        self.mapsets_category.setPlaceholderText("maps")
         form.addRow("Wads folder (sorted library)", _path_row(self.wads_root, True))
-        form.addRow("Mapsets folder name (inside it)", self.mapsets_category)
         form.addRow("IWAD folder", _path_row(self.iwads_dir, True))
         form.addRow("Data folder (parent of the four below)", _path_row(self.data_root, True))
 
@@ -290,9 +421,7 @@ class SettingsDialog(QtWidgets.QDialog):
         for key in self.folder_edits:
             self.folder_edits[key].setText(getattr(s, f"{key}_folder"))
             self.separate_boxes[key].setChecked(getattr(s, SEPARATE_FIELD[key]))
-        self.global_args.setText(s.global_args)
         self.global_wrapper.setText(s.global_wrapper)
-        self.close_on_launch.setChecked(s.close_on_launch)
         self.autoload.set_files(s.autoload_files)
         self.extra_list.clear()
         self.extra_list.addItems(s.extra_folders)
@@ -309,9 +438,7 @@ class SettingsDialog(QtWidgets.QDialog):
         for key in self.folder_edits:
             setattr(s, f"{key}_folder", self.folder_edits[key].text().strip() or key.capitalize())
             setattr(s, SEPARATE_FIELD[key], self.separate_boxes[key].isChecked())
-        s.global_args = self.global_args.text()
         s.global_wrapper = self.global_wrapper.text().strip()
-        s.close_on_launch = self.close_on_launch.isChecked()
         s.extra_folders = [self.extra_list.item(i).text() for i in range(self.extra_list.count())]
         s.hidden_categories = sorted(self._hidden)
         s.autoload_files = self.autoload.paths()
@@ -347,6 +474,19 @@ class SettingsDialog(QtWidgets.QDialog):
         """Choose which folders the Library tab shows, and add folders from elsewhere."""
         page = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(page)
+
+        maps_row = QtWidgets.QFormLayout()
+        self.mapsets_category = QtWidgets.QLineEdit()
+        self.mapsets_category.setPlaceholderText("maps")
+        maps_row.addRow("Folder for map sets", self.mapsets_category)
+        layout.addLayout(maps_row)
+        maps_hint = QtWidgets.QLabel(
+            "The folder (inside the wads folder) shown on the Mapsets tab. Downloaded maps "
+            "are saved there."
+        )
+        maps_hint.setObjectName("muted")
+        maps_hint.setWordWrap(True)
+        layout.addWidget(maps_hint)
 
         layout.addWidget(QtWidgets.QLabel("Folders inside the wads folder - untick one to hide it:"))
         self.folder_list = QtWidgets.QListWidget()
@@ -428,17 +568,15 @@ class SettingsDialog(QtWidgets.QDialog):
         form = QtWidgets.QFormLayout()
         self.global_wrapper = QtWidgets.QLineEdit()
         self.global_wrapper.setPlaceholderText("e.g. gamemoderun  or  mangohud")
-        self.global_args = QtWidgets.QLineEdit()
-        self.global_args.setPlaceholderText("added to every launch")
         form.addRow("Wrapper program", self.global_wrapper)
-        form.addRow("Extra arguments", self.global_args)
-        self.close_on_launch = QtWidgets.QCheckBox("Close DoomDeck when the game launches")
-        self.close_on_launch.setToolTip(
-            "The game keeps running after DoomDeck quits. Play time is not tracked "
-            "in this mode (the play count and last-played date still are)."
-        )
-        form.addRow("", self.close_on_launch)
         layout.addLayout(form)
+        wrapper_hint = QtWidgets.QLabel(
+            "Put in front of every engine command. A preset can set its own wrapper instead. "
+            "Arguments for every launch belong on the engine (Engines tab)."
+        )
+        wrapper_hint.setObjectName("muted")
+        wrapper_hint.setWordWrap(True)
+        layout.addWidget(wrapper_hint)
         layout.addWidget(QtWidgets.QLabel("Autoload files (loaded first, on every launch):"))
         self.autoload = FileList(checkable=False)
         layout.addWidget(self.autoload, 1)
@@ -471,4 +609,8 @@ class SettingsDialog(QtWidgets.QDialog):
         for preset in original.presets:
             if preset.engine in renames:
                 preset.engine = renames[preset.engine]
+        for preset in original.presets:
+            target = self._switch.get(preset.engine)
+            if target:
+                preset.engine = target
         return original

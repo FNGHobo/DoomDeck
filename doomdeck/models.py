@@ -12,7 +12,7 @@ from typing import Any
 
 # Where the user's Doom files live by default. Every one of these is editable in
 # the Settings dialog; they only exist so a first launch works without setup.
-DEFAULT_DOOM_HOME = "~/Games/doom"
+DEFAULT_DOOM_HOME = "/media/4TBSSD/Games/doom"
 
 
 def _from_dict(cls, data: dict[str, Any]):
@@ -62,6 +62,10 @@ class Engine:
     config_flag: str = "-config"
     save_flag: str = "-savedir"
     screenshot_flag: str = "-shotdir"
+    # Which release this engine is (set when DoomDeck installs it, or typed by hand) and
+    # the GitHub "owner/repo" its releases come from, used to look for a newer one.
+    version: str = ""
+    update_repo: str = ""
 
     @property
     def slug(self) -> str:
@@ -119,6 +123,10 @@ class Preset:
     last_played: float = 0.0  # unix time
     play_count: int = 0
     play_seconds: int = 0
+    # Progress through the maps: names ticked off as finished, and how many times each
+    # map was started from DoomDeck (a start map, or "Play this map" in the Maps tab).
+    maps_done: list[str] = field(default_factory=list)
+    map_plays: dict[str, int] = field(default_factory=dict)
 
     def matches(self, query: str) -> bool:
         """True if the search text appears in the name, notes or any file name."""
@@ -131,6 +139,20 @@ class Preset:
     def has_tag(self, tag: str) -> bool:
         """True if the preset carries this tag (capitalisation ignored)."""
         return tag.lower() in (t.lower() for t in self.tags)
+
+    def map_is_done(self, name: str) -> bool:
+        return name.upper() in {m.upper() for m in self.maps_done}
+
+    def set_map_done(self, name: str, done: bool) -> None:
+        """Tick a map off (or back on) the finished list; the list keeps first-finished order."""
+        key = name.upper()
+        kept = [m for m in self.maps_done if m.upper() != key]
+        self.maps_done = kept + [key] if done else kept
+
+    def count_map_play(self, name: str) -> None:
+        if name:
+            key = name.upper()
+            self.map_plays[key] = self.map_plays.get(key, 0) + 1
 
 
 @dataclass
@@ -157,9 +179,6 @@ class Settings:
     # Optional engine config file copied into a preset's config folder the first
     # time that preset launches, so new presets keep your keybinds and video setup.
     seed_config: str = ""
-
-    # Extra command-line arguments added to every launch, for every engine.
-    global_args: str = ""
 
     # Files loaded before the preset's own files on every launch (HUD, music...).
     autoload_files: list[str] = field(default_factory=list)
@@ -217,9 +236,18 @@ class AppConfig:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AppConfig":
         """Rebuild a config from loaded JSON, tolerating missing or extra keys."""
+        settings_data = data.get("settings", {})
+        engines = [_from_dict(Engine, e) for e in data.get("engines", [])]
+        # Older configs had a global "extra arguments" box next to each engine's own.
+        # They did the same job, so the global text moves into every engine's arguments.
+        legacy = str(settings_data.get("global_args", "")).strip()
+        if legacy:
+            for engine in engines:
+                if legacy not in engine.extra_args:
+                    engine.extra_args = f"{engine.extra_args} {legacy}".strip()
         return cls(
-            settings=_from_dict(Settings, data.get("settings", {})),
-            engines=[_from_dict(Engine, e) for e in data.get("engines", [])],
+            settings=_from_dict(Settings, settings_data),
+            engines=engines,
             presets=[_from_dict(Preset, p) for p in data.get("presets", [])],
             last_preset=data.get("last_preset", ""),
             library_meta=dict(data.get("library_meta", {})),

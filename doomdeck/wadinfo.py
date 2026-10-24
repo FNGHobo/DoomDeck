@@ -143,6 +143,76 @@ def _read_maps(path: Path) -> list[tuple[str, str]]:
     return [(n, titles.get(n, "")) for n in sorted(names, key=_map_sort_key)]
 
 
+# Lump / file names (without extension) that only the ZDoom family understands, and what
+# each one means for a person reading a warning.
+_FEATURE_LUMPS = {
+    "TEXTMAP": "udmf", "BEHAVIOR": "hexen-format", "DECORATE": "decorate", "ZSCRIPT": "zscript",
+    "GLDEFS": "gldefs", "ZMAPINFO": "zmapinfo", "MAPINFO": "mapinfo", "UMAPINFO": "umapinfo",
+    "SNDINFO": "sndinfo", "ANIMDEFS": "animdefs", "KEYCONF": "keyconf", "LOCKDEFS": "lockdefs",
+    "SBARINFO": "sbarinfo", "DEHACKED": "dehacked", "MODELDEF": "modeldef",
+    "TEXTURES": "textures", "CVARINFO": "cvarinfo", "MENUDEF": "menudef",
+}
+# Features that need a ZDoom-family engine (a Boom-compatible port ignores or rejects them).
+ZDOOM_ONLY_FEATURES = {
+    "udmf", "hexen-format", "decorate", "zscript", "gldefs", "zmapinfo", "sndinfo", "animdefs",
+    "keyconf", "lockdefs", "sbarinfo", "modeldef", "textures", "cvarinfo", "menudef",
+}
+
+_FEATURE_CACHE: dict[tuple[str, int, int], frozenset[str]] = {}
+
+
+def file_features(path: str | Path) -> frozenset[str]:
+    """Kinds of game data a WAD or PK3 contains: "udmf", "zscript", "decorate", "pk3"...
+
+    Found from lump names / archive member names only, so it is quick. Cached until the
+    file changes. Unreadable files give an empty set.
+    """
+    path = Path(path)
+    try:
+        stat = path.stat()
+    except OSError:
+        return frozenset()
+    key = (str(path), stat.st_mtime_ns, stat.st_size)
+    if key not in _FEATURE_CACHE:
+        _FEATURE_CACHE[key] = _read_features(path)
+    return _FEATURE_CACHE[key]
+
+
+def _read_features(path: Path) -> frozenset[str]:
+    found: set[str] = set()
+    try:
+        suffix = path.suffix.lower()
+        if suffix == ".wad":
+            with open(path, "rb") as handle:
+                for name, _o, _s in _wad_lumps(handle):
+                    if name in _FEATURE_LUMPS:
+                        found.add(_FEATURE_LUMPS[name])
+        elif suffix in ARCHIVE_SUFFIXES:
+            found.add("pk3")
+            with zipfile.ZipFile(path) as archive:
+                for info in archive.infolist():
+                    low = info.filename.lower()
+                    stem = Path(low).stem.upper()
+                    top = low.split("/", 1)[0]
+                    if info.is_dir():
+                        continue
+                    if stem in _FEATURE_LUMPS and (top in ("", stem.lower()) or "/" not in low
+                                                    or top in ("zscript", "decorate", "mapinfo")):
+                        found.add(_FEATURE_LUMPS[stem])
+                    elif top in ("zscript", "decorate", "gldefs"):
+                        found.add(top)
+                    if low.endswith(".wad") and "maps/" in low and info.file_size <= _MAX_EMBEDDED_WAD:
+                        inner = BytesIO(archive.read(info))
+                        for name, _o, _s in _wad_lumps(inner):
+                            if name in ("TEXTMAP", "BEHAVIOR"):
+                                found.add(_FEATURE_LUMPS[name])
+        elif suffix in (".deh", ".bex"):
+            found.add("dehacked")
+    except (OSError, zipfile.BadZipFile, struct.error, ValueError, KeyError, RuntimeError):
+        return frozenset(found)
+    return frozenset(found)
+
+
 def _map_sort_key(name: str):
     """Sort MAP02 before MAP10 and E1M2 before E2M1 by comparing the numbers."""
     return [int(p) if p.isdigit() else p for p in re.findall(r"\d+|\D+", name)]
