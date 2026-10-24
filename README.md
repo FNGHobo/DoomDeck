@@ -7,7 +7,19 @@ A Doom launcher for Linux (Python + PySide6) built around a sorted `wads/` folde
 Highlights: presets with a picture, tags and load order (auto-sort, find missing
 files, drag and drop), a Mapsets tab for multi-file map sets, a Library tree with
 readme previews, Continue-last-save, multiplayer settings, desktop shortcuts per
-preset, import from a pasted command line, and daily config backups.
+preset, import from a pasted command line, and daily config backups. Also:
+
+* **Get WADs** - search the Doomworld /idgames archive and install straight into
+  your sorted wads folder.
+* **Update tracking** - knows which downloads have a newer version (also from the
+  command line, for a desktop notifier).
+* **Maps tab** - per-map "finished" ticks and play counts, and "play this map".
+* **Compatibility warnings** - before launch: map style vs IWAD, ZDoom-only mods on
+  other engines, duplicate maps, a start map that does not exist.
+* **Engine management** - several versions side by side, one-click install of the
+  newest UZDoom release.
+* **Shareable presets** - exports carry a SHA-256 of every file, so a friend (or you,
+  for multiplayer) can check that both sides have exactly the same files.
 
 **This repository contains only the launcher.** It does not include Doom, any
 IWAD or WAD/PK3 files, or an engine; you bring your own. Not affiliated with id
@@ -99,12 +111,16 @@ It uses absolute paths, so run that again after moving the folder.
 
 ## First-time setup (File → Settings)
 
-* **Engines** - add any number of engines (name, program, extra args). The three
-  switches (config / save folder / screenshot folder) default to the ZDoom family
-  and can be changed or cleared per engine. An UZDoom entry
-  (`~/Games/doom/UZDoom/uzdoom`) is pre-filled; point it at your own install.
-* **Folders** - wads folder (and the name of the folder inside it that holds map
-  sets, `maps` by default), IWAD folder, one data folder (default
+* **Engines** - add any number of engines (name, program, extra args, which are
+  added to every launch with that engine). The three switches (config / save folder /
+  screenshot folder) default to the ZDoom family and can be changed or cleared per
+  engine. An UZDoom entry (`~/Games/doom/UZDoom/uzdoom`) is pre-filled; point it at
+  your own install. **Version** and **Update source** (a GitHub `owner/repository`,
+  `UZDoom/UZDoom` for UZDoom) enable **Check for update** and **Install latest...**,
+  which downloads the newest Linux release into DoomDeck's own `engines/<version>/`
+  folder as a *new* engine entry (the old one stays, so you can go back) and offers
+  to switch your presets to it.
+* **Folders** - wads folder, IWAD folder, one data folder (default
   `~/Games/doom/Doomdeck/data`) with the four default sub-folders (Config, Save,
   Demo, Screenshot) and a switch for "own subfolder per preset". With the defaults,
   preset "Foo" saves to `<data>/Save/Foo/`; the example under the settings shows the
@@ -114,12 +130,18 @@ It uses absolute paths, so run that again after moving the folder.
   the wads folder to hide it (nothing is moved or deleted; you can also right-click a
   folder in the Library tab and pick "Hide"), and add extra folders from anywhere on
   disk, which then appear as if they were inside the wads folder. The Mapsets tab
-  keeps listing the maps folder even if it is hidden from the Library.
-* **General** - global wrapper (e.g. `gamemoderun`), global arguments, autoload
-  files that load before everything else, and **Close DoomDeck when the game
-  launches** (also a tick box next to the Launch button). The game keeps running
-  after DoomDeck quits; the play count and last-played date are recorded at launch,
-  but play time cannot be measured in this mode.
+  keeps listing the maps folder even if it is hidden from the Library. This tab
+  also names the **folder for map sets** (`maps` by default): the Mapsets tab lists
+  it, and downloaded maps are saved there.
+* **General** - global wrapper (e.g. `gamemoderun`; a preset can set its own) and
+  autoload files that load before everything else. "Close on launch" is the tick box
+  next to the Launch button: the game keeps running after DoomDeck quits; the play
+  count and last-played date are recorded at launch, but play time cannot be
+  measured in this mode.
+
+Versions before 0.3 had a global "Extra arguments" setting. It was a duplicate of
+the per-engine one, so it was removed; if you had one, it is added to your engines'
+extra arguments automatically the first time 0.3 starts.
 
 ## Using it
 
@@ -134,6 +156,28 @@ It uses absolute paths, so run that again after moving the folder.
   resources first. "New preset from ticked" builds a preset (and guesses the IWAD);
   "Add ticked to preset" appends to the current one. Selecting a row shows how many
   maps it contains.
+* **Get WADs tab** - searches the Doomworld /idgames archive (by title, file name,
+  author, description or text file; or paste a Doomworld link or file id) and shows
+  descriptions. **Download and install** fetches the file from an archive mirror and
+  unpacks it into `<wads folder>/<category>/<project>/` (levels go to the map sets
+  folder, sounds and music to `audio`, graphics and themes to `visuals`, utilities to
+  `utilities`, combos to `total-conversions`, anything else to `needs-to-be-sorted`).
+  It asks before replacing a project that is already there and can then make a preset
+  from it. Needs an internet connection; nothing is downloaded until you press the
+  button.
+* **Updates** - projects installed from Get WADs remember where they came from. For
+  anything else, right-click it in the Library tab, **Set update source...** and give
+  an idgames link or id, or a GitHub link or `owner/repository` (what you have now is
+  taken to be current). **Library → Updates** (or Tools → Check library for updates)
+  marks projects that have a newer version with a **⬆**; right-click for **Update now**
+  (idgames: re-downloads over the same folder; GitHub: opens the releases page),
+  **Mark as up to date** or **Forget update source**. From a terminal,
+  `./run.sh --check-updates` prints the same report (`--json` for scripts) and exits
+  with status 10 when something has an update, which suits a desktop notifier.
+* **Maps tab** - lists every map in the preset's files. Tick a map when you have
+  finished it; the "Played" column counts launches that started on that map (a normal
+  start counts for the preset's Start map). Double-click or **Play this map** starts
+  on that map for one launch without changing the preset's own Start map.
 * **Setup tab** - engine, IWAD, skill, **config**, start map (list read from the
   WAD/PK3), toggles, resolution, wrapper, extra args, and the load order (tick to
   enable, drag to reorder, drop files from a file manager).
@@ -167,6 +211,17 @@ It uses absolute paths, so run that again after moving the folder.
   button gives them the exact command). The host decides skill, map and rules.
   Demos always play single player.
 
+* **Compatibility warnings** - shown under the load order and in the preset list:
+  a Doom II style map list (MAPxx) with a Doom 1 IWAD or the other way round, files
+  that both contain the same map, a start map that is in none of the files, and mods
+  that use ZDoom-only features (DECORATE, ZScript, GLDEFS, UDMF maps, a PK3...) when the
+  engine is a Boom or vanilla port. They are advice; nothing is blocked.
+* **Sharing a preset** - **Export...** writes the preset with the size and SHA-256
+  of every file and of the IWAD, and the engine version. **Import...** finds each file
+  in your library by name, points the preset at your copy, and reports files that are
+  missing or that differ from the sender's (a different version of a wad is the usual
+  cause of a multiplayer desync). **Preset → Check files against a shared preset...**
+  does the comparison without importing. Old exports without checksums still import.
 * **Continue** (next to Launch) - loads the preset's newest save and keeps playing;
   greyed out until the preset has a save.
 * **Find missing files** (Setup tab, under the load order) - when sorting the wads
@@ -208,18 +263,35 @@ It uses absolute paths, so run that again after moving the folder.
   launch shows **✖** in the list (hover for the details). **Preset → Check all
   presets...** lists every problem at once.
 * **Shortcuts** - Ctrl+N new preset, Ctrl+D duplicate, F2 rename, Ctrl+F search,
-  Ctrl+Shift+Return continue the last save, Ctrl+Return launch. The **Preset** menu
-  also has Find missing files, Auto-sort and Desktop shortcut.
+  Ctrl+Shift+Return continue the last save, Ctrl+Return launch, Ctrl+Shift+G Get WADs. The **Preset** menu also has Find missing files,
+  Auto-sort and Desktop shortcut; the **Tools** menu has Get WADs and the
+  update checks.
 
 Not included on purpose: dmflags/compatibility calculators.
 
+## Install as a package (Arch / pip)
+
+`packaging/PKGBUILD` builds an Arch package (`cd packaging && makepkg -si`); it needs
+a tagged release on GitHub (`v0.4.0`). Installed that way, DoomDeck keeps its config,
+logs and downloaded engines in `~/.config/doomdeck` instead of beside the program
+(set `DOOMDECK_HOME` to choose another folder). `pip install .` also works and gives a
+`doomdeck` command.
+
 ## Tests
 
-The tests cover everything except the window, so they need no PySide6 and no display:
+No PySide6 and no display are needed. The window code runs against a small stand-in
+for Qt (`tests/qtstub.py`), so the tests catch mistakes in DoomDeck's own code but not
+how a real window looks:
 
     python3 -m unittest discover -s tests -t .
 
+GitHub Actions runs them on Python 3.10 to 3.13 for every push.
 `python3 -m doomdeck --print-command "Preset name"` prints a preset's command.
+
+## About the code
+
+DoomDeck was written with the help of an AI assistant (Claude). It is MIT licensed and
+the tests are in the repository.
 
 ## License
 
