@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=DoomDeck
+GenericName=Doom Launcher
+Comment=Launcher for Doom source ports, built around the sorted wads folder
+Exec=doomdeck
+Icon=doomdeck
+Terminal=false
+Categories=Game;
+Keywords=doom;uzdoom;gzdoom;wad;wads;launcher;
+StartupWMClass=doomdeck

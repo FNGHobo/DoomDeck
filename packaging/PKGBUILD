@@ -1,0 +1,44 @@
+# Maintainer: FNGHobo
+#
+# Arch Linux package for DoomDeck. Build and install it from a clone of the repository:
+#   cd packaging && makepkg -si
+# (the tarball comes from the GitHub tag v$pkgver, so tag a release before building).
+#
+# Note for AUR submission: DoomDeck was written with the help of an AI assistant (Claude).
+pkgname=doomdeck
+pkgver=0.4.0
+pkgrel=1
+pkgdesc='Doom launcher for ZDoom-family engines with a sorted wads library, idgames browser'
+arch=('any')
+url='https://github.com/FNGHobo/DoomDeck'
+license=('MIT')
+depends=('python' 'pyside6')
+makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
+optdepends=(
+  'qt6-wayland: native Wayland window'
+  'qt6-imageformats: .webp images as preset pictures'
+  'xdg-utils: open folders in the file manager'
+  'gamemode: launch wrapper (gamemoderun)'
+  'mangohud: launch wrapper'
+)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+# Replace SKIP with the real checksum (run `updpkgsums`) once the tag exists.
+sha256sums=('SKIP')
+
+build() {
+  cd "DoomDeck-$pkgver"
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  cd "DoomDeck-$pkgver"
+  python -m unittest discover -s tests -t .
+}
+
+package() {
+  cd "DoomDeck-$pkgver"
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -Dm644 packaging/doomdeck.desktop "$pkgdir/usr/share/applications/doomdeck.desktop"
+  install -Dm644 doomdeck.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/doomdeck.png"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
