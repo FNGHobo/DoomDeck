@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "doomdeck"
+dynamic = ["version"]
+description = "Doom launcher for ZDoom-family engines: sorted wads library, idgames browser"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "FNGHobo" }]
+keywords = ["doom", "uzdoom", "gzdoom", "wad", "launcher"]
+classifiers = [
+    "Environment :: X11 Applications :: Qt",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Games/Entertainment :: First Person Shooters",
+]
+dependencies = ["PySide6-Essentials"]
+
+[project.urls]
+Homepage = "https://github.com/FNGHobo/DoomDeck"
+
+[project.scripts]
+doomdeck = "doomdeck.__main__:main"
+
+[tool.setuptools]
+packages = ["doomdeck"]
+
+[tool.setuptools.dynamic]
+version = { attr = "doomdeck.__version__" }
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["F", "E9"]
