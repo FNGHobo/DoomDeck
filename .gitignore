@@ -11,6 +11,8 @@ __pycache__/
 /logs/
 /pictures/
 /backups/
+/downloads/
+/engines/
 
 # Scratch copies and update backups
 /to test/
