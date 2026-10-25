@@ -292,3 +292,76 @@ class SettingsTests(SmokeBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ServerCheckTests(SmokeBase):
+    """The Check server button and the on-Launch check, with the network replaced."""
+
+    def setUp(self):
+        super().setUp()
+        from doomdeck import modsync, serverquery
+        self.modsync, self.sq = modsync, serverquery
+        self.preset = self.config.presets[0]
+        self.preset.net_mode, self.preset.net_address = "join", "10.0.0.5"
+        self.window._select_preset(self.preset)
+        self.good = Path(self.evit)
+        data = self.good.read_bytes()
+        import hashlib
+        self.md5 = hashlib.md5(data).hexdigest()  # noqa: S324
+
+    def info(self, files):
+        return self.sq.ServerInfo(protocol="zandronum", address="10.0.0.5", port=10666, name="Srv",
+                                  files=[self.sq.ServerFile(*f) for f in files])
+
+    def test_button_needs_an_address(self):
+        self.preset.net_address = ""
+        self.window.check_server()
+        self.assertTrue(any("address" in t for _k, _t, t in qtstub.LOG))
+
+    def test_matching_server_reports_and_applies_order(self):
+        info = self.info([(self.good.name, self.md5)])
+        self.preset.files = []
+        with mock.patch.object(self.sq, "query", return_value=info):
+            self.window.check_server()
+        self.assertEqual(self.preset.files, [str(self.good)])
+        self.assertTrue(any(self.good.name in t for _k, _t, t in qtstub.LOG))
+
+    def test_missing_file_is_downloaded_then_applied(self):
+        info = self.info([(self.good.name, self.md5), ("new.wad", "")])
+        fetched = self.modsync.Fetched("new.wad", True, str(self.root / "new.wad"), source="/idgames x")
+        (self.root / "new.wad").write_bytes(b"x")
+
+        def fake_fetch(info, matches, wads_root, *a, **k):
+            for m in matches:
+                if m.name == "new.wad":
+                    m.status, m.path = "ok", fetched.path
+            return self.modsync.SyncReport([fetched])
+
+        with mock.patch.object(self.sq, "query", return_value=info), \
+                mock.patch.object(self.modsync, "fetch_missing", side_effect=fake_fetch):
+            self.window.check_server()
+        self.assertEqual(self.preset.files, [str(self.good), str(self.root / "new.wad")])
+
+    def test_declining_the_download_changes_nothing(self):
+        info = self.info([("nope.wad", "")])
+        before = list(self.preset.files)
+        qtstub.CANNED["question"] = qtstub.FakeMessageBox.StandardButton.No
+        with mock.patch.object(self.sq, "query", return_value=info), \
+                mock.patch.object(self.modsync, "fetch_missing") as fetch:
+            self.window.check_server()
+        fetch.assert_not_called()
+        self.assertEqual(self.preset.files, before)
+
+    def test_unreachable_server_explains(self):
+        with mock.patch.object(self.sq, "query", side_effect=self.sq.QueryError("No answer.")):
+            self.window.check_server()
+        self.assertTrue(any("Only Zandronum and Odamex" in t for _k, _t, t in qtstub.LOG))
+
+    def test_launch_gate_only_for_queryable_engines(self):
+        self.preset.net_autosync = True
+        self.assertFalse(self.window._server_sync_wanted(self.preset))  # UZDoom: no query exists
+        self.config.engines[0].name = "Zandronum"
+        self.preset.engine = "Zandronum"
+        self.assertTrue(self.window._server_sync_wanted(self.preset))
+        self.preset.net_mode = "host"
+        self.assertFalse(self.window._server_sync_wanted(self.preset))

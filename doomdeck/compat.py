@@ -34,6 +34,21 @@ def engine_family(name: str, path: str = "") -> str:
     return "unknown"
 
 
+def net_kind(name: str, path: str = "") -> str:
+    """Which multiplayer switches an engine understands: "zandronum", "odamex" or "zdoom".
+
+    Zandronum (and Skulltag) and Odamex join a dedicated server with `-connect`; their
+    `-port` is the local port, so it must not be passed. Everything else is treated as
+    a ZDoom-style peer-to-peer engine (`-host` / `-join`).
+    """
+    text = f"{name} {Path(path).name}".lower()
+    if "zandronum" in text or "skulltag" in text:
+        return "zandronum"
+    if "odamex" in text:
+        return "odamex"
+    return "zdoom"
+
+
 def iwad_kind(iwad_name: str) -> str:
     """"doom2", "doom", "other" (Heretic, Hexen...) or "" for an IWAD we cannot place."""
     stem = Path(iwad_name).stem.lower()

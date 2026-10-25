@@ -3,10 +3,11 @@
 DoomDeck keeps its own files (config, logs, backups, pictures, downloaded engines) in
 one folder, APP_DIR:
 
-* run from a source folder (the folder has run.sh): beside the program, so the whole
-  tool stays in one folder and can be moved around;
-* installed as a package (pacman/pip): ~/.config/doomdeck, since the install location is
-  read-only;
+* run from a source folder (the folder has run.sh, run.bat or run.command): beside the
+  program, so the whole tool stays in one folder and can be moved around;
+* installed as a package (pacman/pip): the per-user folder of the system
+  (~/.config/doomdeck on Linux, %APPDATA%\\DoomDeck on Windows,
+  ~/Library/Application Support/DoomDeck on macOS), since the install location is read-only;
 * DOOMDECK_HOME in the environment overrides both.
 
 Set DOOMDECK_CONFIG to use a different config file inside that folder.
@@ -17,11 +18,11 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import sys
 import tempfile
 import time
 from pathlib import Path
 
+from . import osinfo
 from .models import AppConfig, Engine, DEFAULT_DOOM_HOME
 
 PROGRAM_DIR = Path(__file__).resolve().parent.parent
@@ -34,11 +35,10 @@ def resolve_app_dir(environ: dict | None = None, program_dir: Path | None = None
     program_dir = program_dir or PROGRAM_DIR
     if environ.get("DOOMDECK_HOME"):
         return Path(environ["DOOMDECK_HOME"]).expanduser()
-    portable = (program_dir / "run.sh").is_file() or (program_dir / CONFIG_FILENAME).is_file()
+    portable = any((program_dir / marker).is_file() for marker in osinfo.PORTABLE_MARKERS)
     if portable and os.access(program_dir, os.W_OK):
         return program_dir
-    base = environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
-    return Path(base) / "doomdeck"
+    return osinfo.app_dir_base(environ=environ)
 
 
 APP_DIR = resolve_app_dir()
@@ -58,13 +58,14 @@ def find_icon() -> Path | None:
 
 
 def launcher_command() -> list[str]:
-    """Command that starts DoomDeck, for desktop shortcuts: run.sh if it exists, else the
-    installed `doomdeck` program, else this Python running the package."""
-    script = PROGRAM_DIR / "run.sh"
+    """Command that starts DoomDeck, for shortcuts: this system's run script if it exists
+    (run.sh, run.bat or run.command), else the installed `doomdeck` program, else this
+    Python running the package."""
+    script = PROGRAM_DIR / osinfo.launcher_script()
     if script.is_file():
         return [str(script)]
     installed = shutil.which("doomdeck")
-    return [installed] if installed else [sys.executable, "-m", "doomdeck"]
+    return [installed] if installed else [osinfo.gui_python(), "-m", "doomdeck"]
 
 
 def default_path() -> Path:
@@ -77,7 +78,7 @@ def default_config() -> AppConfig:
     """A first-run config with the user's UZDoom install pre-filled as an engine."""
     config = AppConfig()
     config.engines.append(
-        Engine(name="UZDoom", path=f"{DEFAULT_DOOM_HOME}/UZDoom/uzdoom")
+        Engine(name="UZDoom", path=osinfo.default_engine_path(DEFAULT_DOOM_HOME))
     )
     return config
 

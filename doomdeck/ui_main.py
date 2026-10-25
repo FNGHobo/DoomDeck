@@ -27,12 +27,13 @@ from .ui_library import LibraryMixin
 from .ui_maps import MapsMixin
 from .ui_online import OnlineMixin
 from .ui_presets import PresetsMixin
+from .ui_server import ServerMixin
 from .ui_settings import SettingsDialog
 from .ui_userdata import UserDataMixin
 from .ui_widgets import FILE_FILTER
 
 
-class MainWindow(PresetsMixin, LibraryMixin, OnlineMixin, MapsMixin,
+class MainWindow(PresetsMixin, LibraryMixin, OnlineMixin, MapsMixin, ServerMixin,
                  UserDataMixin, QtWidgets.QMainWindow):
     def __init__(self, config: AppConfig, config_path: Path | None = None):
         super().__init__()
@@ -273,7 +274,7 @@ class MainWindow(PresetsMixin, LibraryMixin, OnlineMixin, MapsMixin,
                 ("&Continue last save", self.continue_last_save, "Ctrl+Shift+Return"),
                 ("Find &missing files", self.find_missing_files, ""),
                 ("&Auto-sort load order", self.auto_sort_files, ""),
-                ("Create desktop &shortcut", self.create_shortcut, ""),
+                ("Create menu &shortcut", self.create_shortcut, ""),
                 ("Check &all presets…", self.check_all_presets, ""),
                 ("Check files against a &shared preset…", self.check_shared_preset, ""),
             )),
@@ -309,12 +310,16 @@ class MainWindow(PresetsMixin, LibraryMixin, OnlineMixin, MapsMixin,
 
     # =================================================================== launching
     def launch_current(self, *_args, load_save: str | None = None, play_demo: str | None = None,
-                       map_override: str | None = None) -> None:
+                       map_override: str | None = None, _synced: bool = False) -> None:
         """Start the engine for the current preset (or stop it if already running)."""
         if self._process is not None:
             self._process.terminate()
             return
         if self.current is None:
+            return
+        if not _synced and self._server_sync_wanted(self.current):
+            self._server_flow(self.current, lambda: self.launch_current(
+                load_save=load_save, play_demo=play_demo, map_override=map_override, _synced=True))
             return
         problems = launch.check(self.config, self.current)
         errors = [x.text for x in problems if x.level == "error"]

@@ -16,7 +16,7 @@ import time
 
 from . import __version__
 from . import config as config_io
-from . import launch, updates
+from . import launch, osinfo, updates
 
 
 def print_command(name: str) -> int:
@@ -108,18 +108,24 @@ def main() -> int:
 
     # Qt's Wayland text-input plugin prints a harmless warning every time focus moves
     # between fields. Hide just that category (keep any rules the user already set).
-    # This has to happen before Qt is imported.
-    existing = os.environ.get("QT_LOGGING_RULES", "")
-    os.environ["QT_LOGGING_RULES"] = ";".join(
-        filter(None, [existing, "qt.qpa.wayland.textinput=false"])
-    )
+    # This has to happen before Qt is imported. Only Linux has Wayland.
+    if osinfo.current() == osinfo.LINUX:
+        existing = os.environ.get("QT_LOGGING_RULES", "")
+        os.environ["QT_LOGGING_RULES"] = ";".join(
+            filter(None, [existing, "qt.qpa.wayland.textinput=false"])
+        )
 
     try:
         from PySide6 import QtGui, QtWidgets
     except ImportError:
+        hints = {
+            osinfo.LINUX: "On Arch: sudo pacman -S pyside6",
+            osinfo.WINDOWS: "Or: py -3 -m pip install PySide6-Essentials",
+            osinfo.MACOS: "Or: python3 -m pip install PySide6-Essentials",
+        }
         print(
-            "PySide6 is not installed. On Arch: sudo pacman -S pyside6\n"
-            "Or start DoomDeck with ./run.sh, which sets up a private copy for you.",
+            f"PySide6 is not installed. {hints[osinfo.current()]}\n"
+            f"Or start DoomDeck with {osinfo.launcher_script()}, which sets up a private copy for you.",
             file=sys.stderr,
         )
         return 1

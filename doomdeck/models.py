@@ -10,9 +10,11 @@ import re
 from dataclasses import dataclass, field, fields, asdict
 from typing import Any
 
+from . import osinfo
+
 # Where the user's Doom files live by default. Every one of these is editable in
 # the Settings dialog; they only exist so a first launch works without setup.
-DEFAULT_DOOM_HOME = "/media/4TBSSD/Games/doom"
+DEFAULT_DOOM_HOME = osinfo.default_doom_home()
 
 
 def _from_dict(cls, data: dict[str, Any]):
@@ -118,6 +120,7 @@ class Preset:
     net_game: str = ""  # "" = co-op, "deathmatch" or "altdeath"
     net_address: str = ""
     net_port: int = 0
+    net_autosync: bool = False  # when joining: check the server and fetch its files on Launch
 
     # Play statistics, updated by the launcher.
     last_played: float = 0.0  # unix time

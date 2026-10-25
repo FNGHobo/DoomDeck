@@ -4,10 +4,10 @@ dropped onto the window. No Qt here, so it is all unit tested.
 
 from __future__ import annotations
 
-import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import osinfo
 from .library import LOADABLE, _collect_files
 from .models import AppConfig, Preset
 
@@ -53,15 +53,12 @@ def parse_command(text: str) -> ParsedCommand:
     `-warp 5` becomes MAP05 and `-warp 1 2` becomes E1M2. Switches that DoomDeck
     manages itself (config, save folder...) are dropped; unknown ones go to `extra`.
     """
-    try:
-        tokens = shlex.split(text.replace("\\\n", " "))
-    except ValueError:
-        tokens = text.split()
+    tokens = osinfo.split_args(text)
     parsed = ParsedCommand()
     i = 0
     wrappers: list[str] = []
     while i < len(tokens) and not _is_switch(tokens[i]):
-        if Path(tokens[i]).name in _WRAPPERS:
+        if Path(tokens[i]).stem.lower() in _WRAPPERS:
             wrappers.append(tokens[i])
         else:
             parsed.engine = tokens[i]
@@ -145,7 +142,7 @@ def build_preset(
         name=name, engine=engine, iwad=iwad, files=list(parsed.files), skill=parsed.skill,
         warp=parsed.warp, width=parsed.width, height=parsed.height,
         wrapper=parsed.wrapper,
-        extra_args=" ".join(shlex.quote(part) for part in parsed.extra),
+        extra_args=" ".join(osinfo.quote_arg(part) for part in parsed.extra),
     )
     for flag, value in parsed.flags.items():
         setattr(preset, flag, value)

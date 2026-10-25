@@ -7,14 +7,13 @@ command line (`python -m doomdeck --print-command "My preset"`).
 from __future__ import annotations
 
 import os
-import shlex
 import shutil
 import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import compat
+from . import compat, osinfo
 from .library import is_patch
 from .models import AppConfig, Engine, Preset, Settings, safe_name
 
@@ -135,19 +134,24 @@ def create_config(settings: Settings, preset: Preset, name: str, source: Path | 
 def engine_config_files(engine: Engine) -> list[Path]:
     """Config files the engine itself keeps outside DoomDeck, so one can be imported.
 
-    Looks for *.ini in ~/.config/<name> (XDG_CONFIG_HOME is honoured) for the engine's
-    name and program name, plus the usual port names, and next to the engine program
-    (portable installs). Only files that exist are returned, without duplicates.
+    Looks for *.ini where this system's source ports keep them (see
+    osinfo.engine_ini_folders: ~/.config/<name> on Linux, Documents/My Games/<Name> on
+    Windows, ~/Library/Preferences on macOS) for the engine's name and program name plus
+    the usual port names, and next to the engine program (portable installs). Only files
+    that exist are returned, without duplicates.
     """
-    home = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
-    names = {engine.slug, Path(engine.path).name.lower(), "uzdoom", "gzdoom", "zandronum", "lzdoom"}
-    folders = [Path(home) / name for name in sorted(names) if name] + [Path(engine.path).expanduser().parent]
+    program = osinfo.resolve_program(engine.path)
+    names = {engine.slug, program.stem.lower(), "uzdoom", "gzdoom", "zandronum", "lzdoom"}
+    names.discard("")
+    folders = osinfo.engine_ini_folders(sorted(names)) + [(program.parent, False)]
     found: list[Path] = []
-    for folder in folders:
+    for folder, shared in folders:
         try:
             entries = sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.lower() == ".ini")
         except OSError:
             continue
+        if shared:  # a folder every program uses: only the files named after an engine
+            entries = [p for p in entries if p.stem.lower() in names]
         found += [p for p in entries if p not in found]
     return found
 
@@ -208,14 +212,16 @@ def check(config: AppConfig, preset: Preset) -> list[Problem]:
         problems.append(Problem("error", "No engine is selected (or it was deleted)."))
     else:
         exe = Path(engine.path).expanduser()
-        if not exe.is_file():
+        why = osinfo.program_problem(exe)
+        if why.startswith("not found"):
             problems.append(Problem("error", f"Engine file not found: {exe}"))
-        elif not os.access(exe, os.X_OK):
-            problems.append(
-                Problem("error", f"Engine is not executable (chmod +x it): {exe}")
-            )
+        elif why:
+            problems.append(Problem("error", f"Engine is {why}: {exe}"))
     if preset.net_mode == "join" and not preset.net_address.strip():
         problems.append(Problem("error", "Multiplayer: enter the host's address to join."))
+    if preset.net_mode == "host" and engine is not None and compat.net_kind(engine.name, engine.path) != "zdoom":
+        problems.append(Problem(
+            "error", "Multiplayer: this engine can only join a game; run its dedicated server program to host."))
     if engine is not None and engine.config_flag and preset.config:
         if not config_file(config.settings, preset, engine).is_file():
             problems.append(Problem(
@@ -243,7 +249,7 @@ def check(config: AppConfig, preset: Preset) -> list[Problem]:
         ):
             problems.append(Problem("warning", text))
     if preset.wrapper.strip() or config.settings.global_wrapper.strip():
-        wrapper = shlex.split(preset.wrapper.strip() or config.settings.global_wrapper.strip())
+        wrapper = osinfo.split_args(preset.wrapper.strip() or config.settings.global_wrapper.strip())
         if wrapper and shutil.which(wrapper[0]) is None:
             problems.append(Problem("warning", f"Wrapper program not found: {wrapper[0]}"))
     return problems
@@ -266,14 +272,25 @@ def worst_level(problems: list[Problem]) -> str:
     return "warning" if problems else ""
 
 
-def net_args(preset: Preset) -> list[str]:
-    """The multiplayer switches for a preset (ZDoom family), or [] for single player.
+def net_args(preset: Preset, kind: str = "zdoom") -> list[str]:
+    """The multiplayer switches for a preset, or [] for single player.
 
-    Hosting gives `-host <players>` plus the game type; joining gives `-join <address>`
-    (nothing at all while the address is empty, which check() reports as an error).
-    A port is passed to both. The host chooses skill, map and rules, so the joining
-    side only needs to load the same IWAD and files in the same order.
+    `kind` is compat.net_kind() of the engine.
+
+    ZDoom family (default): hosting gives `-host <players>` plus the game type, joining
+    gives `-join <address>`, and a port is passed to both.
+
+    Zandronum and Odamex: only joining is supported (a dedicated server is a separate
+    program). It gives `-connect <address>`, with a chosen port written into the
+    address as host:port, because for these engines `-port` is the local port.
     """
+    address = preset.net_address.strip()
+    if kind in ("zandronum", "odamex"):
+        if preset.net_mode != "join" or not address:
+            return []
+        if preset.net_port > 0 and not _has_port(address):
+            address = f"{address}:{preset.net_port}"
+        return ["-connect", address]
     args: list[str] = []
     if preset.net_mode == "host":
         args += ["-host", str(max(2, preset.net_players))]
@@ -281,8 +298,8 @@ def net_args(preset: Preset) -> list[str]:
             args.append("-deathmatch")
         elif preset.net_game == "altdeath":
             args.append("-altdeath")
-    elif preset.net_mode == "join" and preset.net_address.strip():
-        args += ["-join", preset.net_address.strip()]
+    elif preset.net_mode == "join" and address:
+        args += ["-join", address]
     else:
         return []
     if preset.net_port > 0:
@@ -290,13 +307,17 @@ def net_args(preset: Preset) -> list[str]:
     return args
 
 
+def _has_port(address: str) -> bool:
+    """True when a server address already ends in :port ("[::1]:5029", "host:5029")."""
+    if address.startswith("["):
+        return "]:" in address
+    return address.count(":") == 1
+
+
 def _split(text: str) -> list[str]:
-    """Split a user-typed argument string the way a shell would (quotes allowed)."""
-    try:
-        return shlex.split(text)
-    except ValueError:
-        # Unbalanced quote: fall back to plain whitespace so the launch still works.
-        return text.split()
+    """Split a user-typed argument string the way this system's shell would (quotes allowed;
+    on Windows a backslash is an ordinary character). Never raises."""
+    return osinfo.split_args(text)
 
 
 def build_command(
@@ -323,7 +344,7 @@ def build_command(
 
     cmd: list[str] = []
     cmd += _split(preset.wrapper.strip() or settings.global_wrapper.strip())
-    cmd.append(str(Path(engine.path).expanduser()))
+    cmd.append(str(osinfo.resolve_program(engine.path)))
     cmd += _split(engine.extra_args)
 
     iwad = resolve_iwad(settings, preset.iwad)
@@ -350,7 +371,7 @@ def build_command(
     if preset.skill:
         cmd += ["-skill", str(preset.skill)]
     if not play_demo:  # demos are single player
-        cmd += net_args(preset)
+        cmd += net_args(preset, compat.net_kind(engine.name, engine.path))
     if play_demo:
         cmd += ["-playdemo", play_demo]
     elif load_save:
@@ -424,9 +445,11 @@ def launch(
             stdout=log,
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
-            start_new_session=detach,
+            # Detached: its own session (Linux, macOS) or process group (Windows), so the
+            # game keeps running after DoomDeck or its terminal is closed.
+            **osinfo.popen_options(detach),
             # Run from the engine's own folder so it finds its bundled files.
-            cwd=str(Path(engine.path).expanduser().parent) if engine else None,
+            cwd=str(osinfo.resolve_program(engine.path).parent) if engine else None,
         )
     preset.count_map_play(start_map_for(preset, **{
         k: v for k, v in start_options.items() if k in ("map_override", "load_save", "play_demo")
@@ -453,8 +476,8 @@ def record_session(preset: Preset, started: float, ended: float | None = None) -
 
 
 def format_command(cmd: list[str]) -> str:
-    """Join a command into a copy-pasteable shell line."""
-    return " ".join(shlex.quote(part) for part in cmd)
+    """Join a command into a copy-pasteable line for this system's shell."""
+    return osinfo.join_command(cmd)
 
 
 def _exec_quote(arg: str) -> str:

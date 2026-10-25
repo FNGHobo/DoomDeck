@@ -7,13 +7,12 @@ user clicks OK, so Cancel always leaves everything untouched.
 from __future__ import annotations
 
 import copy
-import os
 from pathlib import Path
 
 from PySide6 import QtCore, QtWidgets
 
 from . import config as config_io
-from . import engines, library
+from . import engines, library, osinfo
 from .models import AppConfig, Engine
 from .ui_widgets import FileButtons, FileList
 from .ui_workers import run_with_popup
@@ -225,13 +224,13 @@ class SettingsDialog(QtWidgets.QDialog):
         if engine is None:
             self.engine_status.setText("")
             return
-        exe = Path(engine.path).expanduser()
+        why = osinfo.program_problem(engine.path) if engine.path else ""
         if not engine.path:
             text, style = "No program chosen.", "error"
-        elif not exe.is_file():
+        elif why.startswith("not found"):
             text, style = "File not found.", "error"
-        elif not os.access(exe, os.X_OK):
-            text, style = "Found, but not executable (run chmod +x on it).", "error"
+        elif why:
+            text, style = f"Found, but {why}.", "error"
         else:
             text, style = "Found and executable.", "muted"
         self.engine_status.setText(text)
@@ -309,12 +308,14 @@ class SettingsDialog(QtWidgets.QDialog):
             )
             if answer != QtWidgets.QMessageBox.StandardButton.Yes:
                 return
-        candidates = engines.linux_assets(release)
+        candidates = engines.assets_for(release)
+        system = osinfo.pretty()
         if not candidates:
             names = "\n".join(a.name for a in release.assets) or "(no files)"
             QtWidgets.QMessageBox.warning(
                 self, "Engine update",
-                f"{release.tag} has no download that looks like a Linux build. Its files are:\n{names}\n\n"
+                f"{release.tag} has no download that looks like a {system} build for this computer. "
+                f"Its files are:\n{names}\n\n"
                 f"Download one by hand from {release.url or 'its releases page'} and set the Program path.",
             )
             return
@@ -322,7 +323,7 @@ class SettingsDialog(QtWidgets.QDialog):
         if len(candidates) > 1:
             labels = [f"{a.name}  ({a.size / (1024 * 1024):.0f} MB)" for a in candidates]
             label, ok = QtWidgets.QInputDialog.getItem(
-                self, "Which download?", f"{release.tag} has several Linux downloads:", labels, 0, False
+                self, "Which download?", f"{release.tag} has several {system} downloads:", labels, 0, False
             )
             if not ok:
                 return

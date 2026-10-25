@@ -324,12 +324,16 @@ class EngineInstallTests(unittest.TestCase):
 
     def test_linux_assets_ranked(self):
         rel = engines.parse_release(self.RELEASES[1])
-        names = [a.name for a in engines.linux_assets(rel)]
+        names = [a.name for a in engines.assets_for(rel, "linux", "x86_64")]
         self.assertEqual(names[0], "UZDoom-4.14.3-x86_64.AppImage")
         self.assertIn("uzdoom-4.14.3-linux-x86_64.tar.gz", names)
         self.assertNotIn("uzdoom-4.14.3-windows-x64.zip", names)
         self.assertNotIn("uzdoom-4.14.3.tar.gz.sha256", names)
-        self.assertLess(names.index("uzdoom-4.14.3-linux-x86_64.tar.gz"), names.index("uzdoom-4.14.3-linux-aarch64.tar.gz"))
+        # A build for the other kind of processor cannot run, so it is not offered at all.
+        self.assertNotIn("uzdoom-4.14.3-linux-aarch64.tar.gz", names)
+        arm = [a.name for a in engines.assets_for(rel, "linux", "arm64")]
+        self.assertIn("uzdoom-4.14.3-linux-aarch64.tar.gz", arm)
+        self.assertNotIn("uzdoom-4.14.3-linux-x86_64.tar.gz", arm)
 
     def test_version_compare(self):
         self.assertTrue(engines.is_newer("v4.14.2", "v4.14.3"))

@@ -1,0 +1,23 @@
+# Copy this file to .github/workflows/tests.yml in the repository (the program cannot
+# write to .github itself). It runs the tests on Linux, Windows and macOS.
+name: tests
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Unit tests (no Qt needed)
+        run: python -m unittest discover -s tests -t .
+      - name: Lint
+        run: |
+          pip install ruff
+          ruff check .

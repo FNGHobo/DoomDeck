@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from PySide6 import QtCore, QtGui, QtWidgets
 from . import config as config_io
-from . import importer, launch, library, sharing, userdata, wadinfo
+from . import importer, launch, library, osinfo, shortcuts, sharing, userdata, wadinfo
 from .models import AppConfig, Preset, parse_tags, safe_name, sort_presets
 from .ui_widgets import FileButtons, FileList, PATH_ROLE
 from .ui_common import SKILLS, PICTURE_BOX, PICTURE_ICON, active_preset_files, format_time, format_date
@@ -43,7 +43,7 @@ class PresetsMixin:
         buttons.addWidget(self.remove_picture_button)
         shortcut = QtWidgets.QPushButton("Desktop shortcut")
         shortcut.setToolTip(
-            "Add this preset to your application menu, so it starts the game directly "
+            f"Add this preset to {shortcuts.where_text()}, so it starts the game directly "
             "without opening DoomDeck."
         )
         shortcut.clicked.connect(lambda _c=False: self.create_shortcut())
@@ -208,6 +208,14 @@ class PresetsMixin:
         grid.addWidget(self.net_address, 1, 1, 1, 3)
         grid.addWidget(QtWidgets.QLabel("Port"), 1, 4)
         grid.addWidget(self.net_port, 1, 5)
+        self.net_check = QtWidgets.QPushButton("Check server...")
+        self.net_check.setToolTip(
+            "Ask a Zandronum or Odamex server which files it runs, compare them with your library, and\n"
+            "offer to download what is missing and use the server's files in this profile.")
+        self.net_check.clicked.connect(self.check_server)
+        self.net_autosync = QtWidgets.QCheckBox("On Launch, check the server and get its files (asks first)")
+        grid.addWidget(self.net_check, 3, 0)
+        grid.addWidget(self.net_autosync, 3, 1, 1, 5)
         hint = QtWidgets.QLabel(
             "Everyone needs the same engine version, IWAD, and files in the same load "
             "order (use Copy on the command bar to share them). The host chooses the "
@@ -224,6 +232,7 @@ class PresetsMixin:
         for spin in (self.net_players, self.net_port):
             spin.valueChanged.connect(self._form_changed)
         self.net_address.textEdited.connect(self._form_changed)
+        self.net_autosync.toggled.connect(self._form_changed)
         return box
 
     def _update_net_enabled(self) -> None:
@@ -233,6 +242,8 @@ class PresetsMixin:
         self.net_game.setEnabled(mode == "host")
         self.net_address.setEnabled(mode == "join")
         self.net_port.setEnabled(bool(mode))
+        self.net_check.setEnabled(mode == "join")
+        self.net_autosync.setEnabled(mode == "join")
 
     def check_all_presets(self) -> None:
         """Report which presets have problems (missing files, engine, IWAD...)."""
@@ -346,6 +357,7 @@ class PresetsMixin:
             self.net_game.setCurrentIndex(max(0, self.net_game.findData(preset.net_game)))
             self.net_address.setText(preset.net_address)
             self.net_port.setValue(preset.net_port)
+            self.net_autosync.setChecked(preset.net_autosync)
             self.file_list.set_files(preset.files, preset.disabled_files)
             self.notes_edit.setPlainText(preset.notes)
         else:
@@ -767,6 +779,7 @@ class PresetsMixin:
         p.net_game = self.net_game.currentData() or ""
         p.net_address = self.net_address.text().strip()
         p.net_port = self.net_port.value()
+        p.net_autosync = self.net_autosync.isChecked()
         p.notes = self.notes_edit.toPlainText()
         self.refresh_presets()
         self._update_derived()
@@ -830,22 +843,47 @@ class PresetsMixin:
         head = f"{len(names)} file(s) · played {preset.play_count}x · last {format_date(preset.last_played)}"
         return "\n".join([head, *shown])
 
+    def _shortcut_icon(self, preset: Preset) -> Path | None:
+        """A PNG for the shortcut's icon: the preset's picture, else DoomDeck's own icon.
+
+        Linux uses the file as it is. Windows and macOS need a square PNG of a fixed size,
+        so the picture is scaled into a 256 x 256 transparent square first.
+        """
+        source = Path(preset.picture) if preset.picture and Path(preset.picture).is_file() else config_io.find_icon()
+        if source is None or osinfo.current() == osinfo.LINUX:
+            return source
+        image = QtGui.QImage(str(source))
+        if image.isNull():
+            return None
+        image = image.scaled(256, 256, QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                             QtCore.Qt.TransformationMode.SmoothTransformation)
+        square = QtGui.QImage(256, 256, QtGui.QImage.Format.Format_ARGB32)
+        square.fill(QtCore.Qt.GlobalColor.transparent)
+        painter = QtGui.QPainter(square)
+        painter.drawImage((256 - image.width()) // 2, (256 - image.height()) // 2, image)
+        painter.end()
+        folder = config_io.APP_DIR / "shortcut-icons"
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / f"{safe_name(preset.name)}.png"
+        return target if square.save(str(target), "PNG") else None
+
     def create_shortcut(self) -> None:
-        """Write an application-menu entry that launches the current preset directly."""
+        """Write a menu shortcut (application menu, Start menu or Applications folder)
+        that launches the current preset directly."""
         p = self.current
         if p is None:
             return
-        icon = p.picture if p.picture and Path(p.picture).is_file() else str(config_io.APP_DIR / "doomdeck.png")
         try:
-            target = launch.write_desktop_entry(
-                p, config_io.APP_DIR / "run.sh", icon, config_io.APP_DIR
+            made = shortcuts.create(
+                p, config_io.PROGRAM_DIR, self._shortcut_icon(p),
+                icon_dir=config_io.APP_DIR / "shortcut-icons",
             )
         except OSError as error:
             QtWidgets.QMessageBox.warning(self, "Shortcut", f"Could not write the shortcut: {error}")
             return
         QtWidgets.QMessageBox.information(
             self, "Shortcut",
-            f"Added '{p.name}' to your application menu:\n{target}\n\n"
+            f"Added '{p.name}' to {shortcuts.where_text()}:\n{made.path}\n\n"
             "It starts the game directly, without opening DoomDeck. Run this again after "
             "renaming the preset or changing its picture.",
         )

@@ -1,0 +1,4 @@
+# Keep each run script's line endings right: cmd.exe needs CRLF, bash needs LF.
+*.bat text eol=crlf
+*.sh text eol=lf
+*.command text eol=lf

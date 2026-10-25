@@ -1,0 +1,28 @@
+# Runs the unit tests on every push and pull request.
+# The tests need no display and no PySide6: the window code is exercised against a
+# small stand-in for Qt (tests/qtstub.py), everything else only uses the standard library.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Unit tests
+        run: python -m unittest discover -s tests -t . -v
+      - name: Lint (undefined names, unused imports, syntax errors)
+        if: matrix.python-version == '3.13'
+        run: |
+          python -m pip install ruff
+          ruff check .

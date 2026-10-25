@@ -1,6 +1,6 @@
 # DoomDeck
 
-A Doom launcher for Linux (Python + PySide6) built around a sorted `wads/` folder
+A Doom launcher for Linux, Windows and macOS (Python + PySide6) built around a sorted `wads/` folder
 (category folder → project folder → files). It launches any ZDoom-family engine
 (UZDoom, GZDoom...) with per-preset saves, screenshots, demos and engine configs.
 
@@ -18,6 +18,8 @@ preset, import from a pasted command line, and daily config backups. Also:
   other engines, duplicate maps, a start map that does not exist.
 * **Engine management** - several versions side by side, one-click install of the
   newest UZDoom release.
+* **Server check** - ask a Zandronum or Odamex server which files it runs, see which
+  ones you are missing, and download them (checksum-verified) before joining.
 * **Shareable presets** - exports carry a SHA-256 of every file, so a friend (or you,
   for multiplayer) can check that both sides have exactly the same files.
 
@@ -27,8 +29,10 @@ Software or the UZDoom/GZDoom projects.
 
 ## Requirements and dependencies
 
-DoomDeck is a Linux desktop program. It was developed and tested on Arch Linux with
-Hyprland (Wayland).
+DoomDeck was developed and tested on Arch Linux with Hyprland (Wayland). **Windows
+and macOS support was added later and has been tested only with automated tests and
+mocks, not yet by hand on those systems** - see "Windows" and "macOS" below, and
+please report anything that does not work.
 
 | What | Needed? | Notes |
 | --- | --- | --- |
@@ -64,6 +68,32 @@ Hyprland (Wayland).
 * **The window opens but nothing launches** - check File → Settings → Engines
   points at the engine program (it must be executable); problems are also marked
   next to the preset and listed under the load order.
+
+### Windows
+
+* Install Python 3.10+ from python.org (tick "Add python.exe to PATH"), then
+  double-click **`run.bat`**. It creates `.venv`, installs PySide6 once, and starts the
+  program without a console window.
+* Defaults: Doom files in `%USERPROFILE%\Games\Doom` (change them in Settings); DoomDeck
+  keeps its settings beside the program in the portable layout, or in `%APPDATA%\DoomDeck`
+  when installed as a package. Engines must be `.exe` files.
+* **Install latest...** downloads the 64-bit Windows build of UZDoom (an ARM64 PC
+  uses the x64 build through Windows' emulation).
+* Preset shortcuts are `.lnk` files in the Start menu (made with PowerShell).
+
+### macOS
+
+* Install Python 3.10+ (python.org or `brew install python`), then run
+  `chmod +x run.command` once and double-click **`run.command`** (or run it in Terminal).
+  It creates `.venv` and installs PySide6 on first use.
+* Defaults: Doom files in `~/Games/Doom`; settings in `~/Library/Application
+  Support/DoomDeck` when installed. An engine can be a `.app` (e.g. `UZDoom.app`);
+  DoomDeck runs the program inside it.
+* **Install latest...** handles `.dmg` and `.zip` downloads. UZDoom currently publishes
+  an Apple-silicon (ARM64) macOS build only; on an Intel Mac pick a different engine
+  (e.g. a GZDoom build) and set its path in Settings.
+* Preset shortcuts are small `.app` files in `~/Applications/DoomDeck`. Unsigned apps
+  may need right-click → Open the first time.
 
 ## Wads folder layout
 
@@ -209,7 +239,24 @@ extra arguments automatically the first time 0.3 starts.
   ZDoom-family switches (UZDoom, GZDoom). Nobody else needs DoomDeck: they only need
   the same engine version, IWAD and files in the same load order (the **Copy**
   button gives them the exact command). The host decides skill, map and rules.
-  Demos always play single player.
+  Demos always play single player. For **Zandronum** and **Odamex** only joining is
+  offered, and it passes `-connect <address[:port]>` (their `-port` means the local port,
+  so a port you set is written into the address instead).
+* **Server check** (Multiplayer box, when joining) - **Check server...** asks the
+  server over UDP (port 10666 unless you give another) which IWAD and files it runs, in
+  load order, with each file's MD5. Each file is matched against your library by name
+  and checksum (✔ same, ≠ different version, ✖ missing). DoomDeck then offers to
+  download what is missing, always asking first: from the download sites an Odamex server
+  advertises, then from the /idgames archive by file name. A download is kept only if its
+  checksum equals the server's, and is unpacked into your wads folder. Finally it offers to
+  put the server's files, in the server's order, into the profile (replacing its file
+  list). The tick box **On Launch, check the server and get its files** does this every
+  time you press Launch. Limits: only Zandronum and Odamex servers can be asked (UZDoom
+  and GZDoom hosts have no query; use a shared preset for those); files that are on
+  neither the site list nor /idgames cannot be fetched (a Zandronum server's website is
+  shown for you to open); IWADs are never downloaded; a server may refuse a query
+  for about ten seconds after the last one. Odamex servers are asked with the older
+  query that current servers still answer.
 
 * **Compatibility warnings** - shown under the load order and in the preset list:
   a Doom II style map list (MAPxx) with a Doom 1 IWAD or the other way round, files
@@ -228,8 +275,9 @@ extra arguments automatically the first time 0.3 starts.
   folder moved files, this searches the library for each missing file by name and
   points the preset at the new location. The warning under the load order also tells
   you when two files share a name.
-* **Desktop shortcut** (Setup tab) - adds the preset to your application menu
-  (`~/.local/share/applications/doomdeck-<name>.desktop`) using the preset's picture
+* **Desktop shortcut** (Setup tab) - adds the preset to your application menu (Linux:
+  `~/.local/share/applications/doomdeck-<name>.desktop`; Windows: the Start menu;
+  macOS: `~/Applications/DoomDeck`) using the preset's picture
   as its icon. It starts the game directly, without opening DoomDeck. Run it again
   after renaming the preset or changing its picture. From a terminal:
   `./run.sh --launch "Preset name"`, and `./run.sh --list` lists the presets.
@@ -285,7 +333,8 @@ how a real window looks:
 
     python3 -m unittest discover -s tests -t .
 
-GitHub Actions runs them on Python 3.10 to 3.13 for every push.
+GitHub Actions runs them for every push; `packaging/ci.yml` is a version that also runs
+them on Windows and macOS (copy it to `.github/workflows/`).
 `python3 -m doomdeck --print-command "Preset name"` prints a preset's command.
 
 ## About the code
